@@ -25,6 +25,7 @@ import net.minecraft.client.multiplayer.ServerList;
 import net.minecraft.client.multiplayer.ServerPingAdmission;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.server.LanServer;
+import net.minecraft.client.server.LanServerDetection;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentUtils;
@@ -73,17 +74,89 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
    private final List<ServerSelectionList.OnlineServerEntry> onlineServers = Lists.newArrayList();
    private final ServerSelectionList.Entry lanHeader = new ServerSelectionList.LANHeader();
    private final List<ServerSelectionList.NetworkServerEntry> networkServers = Lists.newArrayList();
+   // Featured servers that are always present and cannot be edited/deleted
+   private final List<ServerSelectionList.Entry> featuredServers = new ArrayList<>();
 
    public ServerSelectionList(
       final JoinMultiplayerScreen screen, final Minecraft minecraft, final int width, final int height, final int y, final int itemHeight
    ) {
       super(minecraft, width, height, y, itemHeight);
       this.screen = screen;
+
+      // initialize featured servers (names use aqua + bold styling to match &b&l)
+      this.featuredServers.add(new ServerSelectionList.Entry() {
+         private final Component nameComp = Component.literal("Eagler IP").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD);
+         private final Component motd = Component.empty();
+         private final String ip = "wss://eagler.frozenmc.org";
+
+         @Override
+         public void extractContent(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final boolean hovered, final float a) {
+            graphics.text(Minecraft.getInstance().font, nameComp, this.getContentX() + 32 + 3, this.getContentY() + 1, -1);
+            graphics.text(Minecraft.getInstance().font, motd, this.getContentX() + 32 + 3, this.getContentY() + 12, -8355712);
+         }
+
+         @Override
+         public Component getNarration() {
+            return nameComp;
+         }
+
+         @Override
+         protected boolean matches(final ServerSelectionList.Entry other) {
+            if (other == this) return true;
+            if (other instanceof ServerSelectionList.OnlineServerEntry ose) return ose.serverData != null && ip.equals(ose.serverData.ip);
+            return false;
+         }
+
+         @Override
+         public void join() {
+            ServerData sd = new ServerData(nameComp.getString(), ip, ServerData.Type.OTHER);
+            // wss relays are handled as WISP
+            sd.setConnectionMode(ServerData.ConnectionMode.WISP);
+            ServerSelectionList.this.screen.join(sd);
+         }
+      });
+
+      this.featuredServers.add(new ServerSelectionList.Entry() {
+         private final Component nameComp = Component.literal("Cracked IP").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD);
+         private final Component motd = Component.empty();
+-        private final String ip = "wss://oxer-26-2-relay-c5f9ad499e09.herokuapp.com";
++        private final String ip = "play.frozenmc.org";
+
+         @Override
+         public void extractContent(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final boolean hovered, final float a) {
+            graphics.text(Minecraft.getInstance().font, nameComp, this.getContentX() + 32 + 3, this.getContentY() + 1, -1);
+            graphics.text(Minecraft.getInstance().font, motd, this.getContentX() + 32 + 3, this.getContentY() + 12, -8355712);
+         }
+
+         @Override
+         public Component getNarration() {
+            return nameComp;
+         }
+
+         @Override
+         protected boolean matches(final ServerSelectionList.Entry other) {
+            if (other == this) return true;
+            if (other instanceof ServerSelectionList.OnlineServerEntry ose) return ose.serverData != null && ip.equals(ose.serverData.ip);
+            return false;
+         }
+
+         @Override
+         public void join() {
+            ServerData sd = new ServerData(nameComp.getString(), ip, ServerData.Type.OTHER);
+-           sd.setConnectionMode(ServerData.ConnectionMode.WISP);
++           // use relay mode for this featured server
++           sd.setConnectionMode(ServerData.ConnectionMode.RELAY);
+            ServerSelectionList.this.screen.join(sd);
+         }
+      });
    }
 
    private void refreshEntries() {
       ServerSelectionList.Entry previouslySelected = this.getSelected();
-      List<ServerSelectionList.Entry> entriesToAdd = new ArrayList<>(this.onlineServers);
+      List<ServerSelectionList.Entry> entriesToAdd = new ArrayList<>();
+      // featured servers first (non-editable)
+      entriesToAdd.addAll(this.featuredServers);
+      entriesToAdd.addAll(this.onlineServers);
       entriesToAdd.add(this.lanHeader);
       entriesToAdd.addAll(this.networkServers);
       this.replaceEntries(entriesToAdd);
@@ -337,6 +410,8 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
 
          this.extractIcon(graphics, this.getContentX(), this.getContentY(), this.icon.textureLocation());
          int index = ServerSelectionList.this.children().indexOf(this);
+         int featuredCount = ServerSelectionList.this.featuredServers.size();
+         int serverListIndex = index - featuredCount;
          if (this.serverData.state() == ServerData.State.PINGING) {
             int iconIndex = (int)(Util.getMillis() / 100L + index * 2 & 7L);
             if (iconIndex > 4) {
@@ -397,7 +472,7 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
                graphics.blitSprite(RenderPipelines.GUI_TEXTURED, ServerSelectionList.JOIN_SPRITE, this.getContentX(), this.getContentY(), 32, 32);
             }
 
-            if (index > 0) {
+            if (serverListIndex > 0) {
                if (this.mouseOverTopLeftQuarter(relX, relY, 32)) {
                   graphics.blitSprite(
                      RenderPipelines.GUI_TEXTURED, ServerSelectionList.MOVE_UP_HIGHLIGHTED_SPRITE, this.getContentX(), this.getContentY(), 32, 32
@@ -408,7 +483,7 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
                }
             }
 
-            if (index < this.screen.getServers().size() - 1) {
+            if (serverListIndex < this.screen.getServers().size() - 1) {
                if (this.mouseOverBottomLeftQuarter(relX, relY, 32)) {
                   graphics.blitSprite(
                      RenderPipelines.GUI_TEXTURED, ServerSelectionList.MOVE_DOWN_HIGHLIGHTED_SPRITE, this.getContentX(), this.getContentY(), 32, 32
@@ -498,11 +573,13 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
          if (event.hasShiftDown()) {
             ServerSelectionList list = this.screen.serverSelectionList;
             int currentIndex = list.children().indexOf(this);
+            int featuredCount = ServerSelectionList.this.featuredServers.size();
+            int serverIndex = currentIndex - featuredCount;
             if (currentIndex == -1) {
                return true;
             }
 
-            if (event.isDown() && currentIndex < this.screen.getServers().size() - 1 || event.isUp() && currentIndex > 0) {
+            if (event.isDown() && serverIndex < this.screen.getServers().size() - 1 || event.isUp() && serverIndex > 0) {
                this.swap(currentIndex, event.isDown() ? currentIndex + 1 : currentIndex - 1);
                return true;
             }
@@ -517,8 +594,13 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
       }
 
       private void swap(final int currentIndex, final int newIndex) {
-         this.screen.getServers().swap(currentIndex, newIndex);
-         this.screen.serverSelectionList.swap(currentIndex, newIndex);
+         int featuredCount = ServerSelectionList.this.featuredServers.size();
+         int serverIndex = currentIndex - featuredCount;
+         int newServerIndex = newIndex - featuredCount;
+         if (serverIndex >= 0 && newServerIndex >= 0) {
+            this.screen.getServers().swap(serverIndex, newServerIndex);
+            this.screen.serverSelectionList.swap(currentIndex, newIndex);
+         }
       }
 
       @Override
@@ -531,12 +613,14 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
          }
 
          int currentIndex = this.screen.serverSelectionList.children().indexOf(this);
-         if (currentIndex > 0 && this.mouseOverTopLeftQuarter(relX, relY, 32)) {
+         int featuredCount = ServerSelectionList.this.featuredServers.size();
+         int serverIndex = currentIndex - featuredCount;
+         if (serverIndex > 0 && this.mouseOverTopLeftQuarter(relX, relY, 32)) {
             this.swap(currentIndex, currentIndex - 1);
             return true;
          }
 
-         if (currentIndex < this.screen.getServers().size() - 1 && this.mouseOverBottomLeftQuarter(relX, relY, 32)) {
+         if (serverIndex < this.screen.getServers().size() - 1 && this.mouseOverBottomLeftQuarter(relX, relY, 32)) {
             this.swap(currentIndex, currentIndex + 1);
             return true;
          }
